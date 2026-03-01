@@ -141,6 +141,9 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
 
       let isDragging = false;
 
+      // This panel predates the shared Leaflet control widgets and is positioned
+      // relative to the map container using top/right, so it keeps its own drag
+      // logic instead of makeDraggable()'s fixed-position viewport model.
       win.onmousedown = (e) => {
         if (e.button !== 0) return;
         if (!e.target.closest('.sat-data-window-title')) return;
@@ -209,6 +212,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         getIsMinimized: () => winMinimized,
         onToggle: setWinMinimized,
         persist: false,
+        manageButtonEvents: false,
       });
       return;
     }
@@ -268,6 +272,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
       getIsMinimized: () => winMinimized,
       onToggle: setWinMinimized,
       persist: false,
+      manageButtonEvents: false,
     });
   };
 

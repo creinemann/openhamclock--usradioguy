@@ -1,3 +1,5 @@
+const _controllers = {};
+
 export function addMinimizeToggle(element, storageKey, options = {}) {
   if (!element) return;
 
@@ -8,9 +10,18 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
     getIsMinimized,
     onToggle,
     persist = true,
+    manageButtonEvents = true,
   } = options;
 
   const minimizeKey = `${storageKey}-minimized`;
+  const controllerKey = `${storageKey}:${buttonClassName}`;
+  if (_controllers[controllerKey]) {
+    _controllers[controllerKey].abort();
+  }
+  const controller = new AbortController();
+  const { signal } = controller;
+  _controllers[controllerKey] = controller;
+
   const header = element.firstElementChild;
   if (!header) return;
 
@@ -43,19 +54,26 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
   };
 
   if (existingButton && existingWrapper) {
-    if (existingButton.dataset.toggleBound !== 'true') {
-      existingButton.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-      });
-      existingButton.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const next = existingWrapper.style.display !== 'none';
-        existingWrapper.style.display = next ? 'none' : 'block';
-        existingButton.innerHTML = next ? '▶' : '▼';
-        element.style.cursor = next ? 'pointer' : 'default';
-        writeState(next);
-      });
-      existingButton.dataset.toggleBound = 'true';
+    if (manageButtonEvents) {
+      existingButton.addEventListener(
+        'mousedown',
+        (e) => {
+          e.stopPropagation();
+        },
+        { signal },
+      );
+      existingButton.addEventListener(
+        'click',
+        (e) => {
+          e.stopPropagation();
+          const next = existingWrapper.style.display !== 'none';
+          existingWrapper.style.display = next ? 'none' : 'block';
+          existingButton.innerHTML = next ? '▶' : '▼';
+          element.style.cursor = next ? 'pointer' : 'default';
+          writeState(next);
+        },
+        { signal },
+      );
     }
     syncState(existingButton, existingWrapper);
     return;
@@ -88,9 +106,13 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
     line-height: 1;
   `;
   minimizeBtn.title = 'Minimize/Maximize';
-  minimizeBtn.addEventListener('mousedown', (e) => {
-    e.stopPropagation();
-  });
+  minimizeBtn.addEventListener(
+    'mousedown',
+    (e) => {
+      e.stopPropagation();
+    },
+    { signal },
+  );
 
   header.style.display = 'flex';
   header.style.justifyContent = 'space-between';
@@ -113,13 +135,16 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
 
   syncState(minimizeBtn, contentWrapper);
 
-  minimizeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const hidden = contentWrapper.style.display === 'none';
-    contentWrapper.style.display = hidden ? 'block' : 'none';
-    minimizeBtn.innerHTML = hidden ? '▼' : '▶';
-    element.style.cursor = hidden ? 'default' : 'pointer';
-    writeState(!hidden);
-  });
-  minimizeBtn.dataset.toggleBound = 'true';
+  minimizeBtn.addEventListener(
+    'click',
+    (e) => {
+      e.stopPropagation();
+      const hidden = contentWrapper.style.display === 'none';
+      contentWrapper.style.display = hidden ? 'block' : 'none';
+      minimizeBtn.innerHTML = hidden ? '▼' : '▶';
+      element.style.cursor = hidden ? 'default' : 'pointer';
+      writeState(!hidden);
+    },
+    { signal },
+  );
 }
