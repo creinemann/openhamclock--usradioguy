@@ -18,9 +18,13 @@ export const metadata = {
   },
 };
 
-export const useLayer = ({ map, enabled, opacity, config, units }) => {
+export const useLayer = ({ map, enabled, satellites: propSatellites, setSatellites, opacity, config, allUnits }) => {
   const layerGroupRef = useRef(null);
-  const [satellites, setSatellites] = useState([]);
+  const [internalSatellites, setInternalSatellites] = useState([]);
+  // Always render from internalSatellites (has enriched radio/speed data).
+  // If parent passes filtered satellites, use their names to filter ours so filter UI still works.
+  const allowedNames = propSatellites && propSatellites.length > 0 ? new Set(propSatellites.map((s) => s.name)) : null;
+  const satellites = allowedNames ? internalSatellites.filter((s) => allowedNames.has(s.name)) : internalSatellites;
 
   const [selectedSats, setSelectedSats] = useState(() => {
     const saved = sessionStorage.getItem('selected_satellites');
@@ -244,7 +248,8 @@ export const useLayer = ({ map, enabled, opacity, config, units }) => {
         })
         .filter(Boolean);
 
-      setSatellites(satArray);
+      setInternalSatellites(satArray);
+      if (setSatellites) setSatellites(satArray);
     } catch (error) {
       console.error('Critical layer error:', error);
     }
@@ -266,13 +271,13 @@ export const useLayer = ({ map, enabled, opacity, config, units }) => {
 
       let isDragging = false;
       win.onmousedown = (e) => {
-        if (e.ctrlKey) {
-          isDragging = true;
-          win.style.cursor = 'move';
-          if (map.dragging) map.dragging.disable();
-          e.preventDefault();
-          e.stopPropagation();
-        }
+        if (e.button !== 0) return;
+        if (!e.target.closest('.sat-drag-handle')) return;
+        isDragging = true;
+        win.style.cursor = 'move';
+        if (map.dragging) map.dragging.disable();
+        e.preventDefault();
+        e.stopPropagation();
       };
       window.onmousemove = (e) => {
         if (!isDragging) return;
@@ -298,7 +303,7 @@ export const useLayer = ({ map, enabled, opacity, config, units }) => {
 
     let html = `
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #00ffff; padding-bottom:3px; margin-bottom:5px;">
-        <span style="font-size:9px; color:#00ffff; font-weight:bold;">🛰 ${activeSats.length} SATS</span>
+        <span class="sat-drag-handle" style="font-size:9px; color:#00ffff; font-weight:bold; cursor:grab; flex:1; padding: 2px 0;">🛰 ${activeSats.length} Tracked Satellites</span>
         <button onclick="window.__satWinToggleMinimize()" style="background:none; border:none; color:#00ffff; cursor:pointer; font-size:12px;">${winMinimized ? '▲' : '▼'}</button>
       </div>
     `;
@@ -306,8 +311,8 @@ export const useLayer = ({ map, enabled, opacity, config, units }) => {
     if (!winMinimized) {
       html += `<button class="sat-clear-btn" onclick="window.clearAllSats()">Clear All</button>`;
       activeSats.forEach((sat) => {
-        const conv = units === 'imperial' ? 0.621371 : 1;
-        const distUnit = units === 'imperial' ? ' mi' : ' km';
+        const conv = allUnits?.dist === 'imperial' ? 0.621371 : 1;
+        const distUnit = allUnits?.dist === 'imperial' ? ' mi' : ' km';
 
         // Only render a table row if the value is a non-empty primitive
         const row = (label, val) => {
@@ -480,7 +485,7 @@ export const useLayer = ({ map, enabled, opacity, config, units }) => {
 
   useEffect(() => {
     if (enabled) renderSatellites();
-  }, [satellites, selectedSats, units, opacity, config, winMinimized]);
+  }, [satellites, selectedSats, allUnits, opacity, config, winMinimized]);
 
   return null;
 };
