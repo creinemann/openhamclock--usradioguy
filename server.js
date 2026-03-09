@@ -6618,7 +6618,26 @@ pskMqtt.cleanupInterval = setInterval(
 
 // SSE endpoint — clients connect here for real-time spots
 // ?type=grid subscribes by grid square instead of callsign
+
+// Per-IP connection limiter for SSE streams to prevent resource exhaustion.
+// Once an SSE connection is established it persists indefinitely, so the normal
+// request-rate limiter doesn't help. This caps concurrent open streams per IP.
+const MAX_SSE_PER_IP = parseInt(process.env.MAX_SSE_PER_IP || '10', 10);
+const sseConnectionsByIP = new Map();
+
 app.get('/api/pskreporter/stream/:identifier', (req, res) => {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  const current = sseConnectionsByIP.get(ip) || 0;
+  if (current >= MAX_SSE_PER_IP) {
+    return res.status(429).json({ error: 'Too many open SSE connections from this IP' });
+  }
+  sseConnectionsByIP.set(ip, current + 1);
+  req.on('close', () => {
+    const count = sseConnectionsByIP.get(ip) || 1;
+    if (count <= 1) sseConnectionsByIP.delete(ip);
+    else sseConnectionsByIP.set(ip, count - 1);
+  });
+
   const identifier = req.params.identifier.toUpperCase();
   const type = (req.query.type || 'call').toLowerCase();
 
