@@ -1098,7 +1098,7 @@ function createServer(registry, version) {
         // Allow requests with no origin (curl, Postman, server-to-server)
         if (!requestOrigin) return callback(null, true);
         if (origins.includes(requestOrigin)) return callback(null, true);
-        callback(new Error('CORS: origin not allowed'));
+        callback(null, false);
       },
       methods: ['GET', 'POST'],
     }),
