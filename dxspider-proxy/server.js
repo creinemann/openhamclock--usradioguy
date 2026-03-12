@@ -19,10 +19,10 @@ app.use(express.json());
 const CONFIG = {
   // DX Spider nodes to try (in order)
   nodes: [
-    { host: 'dxspider.co.uk', port: 7300, name: 'DX Spider UK (G6NHU)' },
     { host: 'dxc.nc7j.com', port: 7373, name: 'NC7J' },
     { host: 'dxc.ai9t.com', port: 7373, name: 'AI9T' },
     { host: 'dxc.w6cua.org', port: 7300, name: 'W6CUA' },
+    { host: 'dxspider.co.uk', port: 7300, name: 'DX Spider UK (G6NHU)' },
   ],
   // Callsign with SSID - use env var as-is, or default to OPENHAMCLOCK-56
   // Set CALLSIGN=YOURCALL-56 for production, CALLSIGN=YOURCALL-57 for staging
