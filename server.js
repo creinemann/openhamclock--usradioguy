@@ -8210,7 +8210,7 @@ async function fetchIonosondeData() {
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const validStations = data
       .filter((s) => {
-        s.time = `${s.time}Z`; // s.time SHOULD have a trailing Z on it so that Date() understands that it is UTC
+        if (s.time.slice(-1) != 'Z') s.time = `${s.time}Z`; // s.time SHOULD have a trailing Z on it so that Date() understands that it is UTC
         if (!s.fof2 || !s.station) return false;
         const stationTime = new Date(s.time);
         return stationTime > twoHoursAgo && s.cs > 0; // confidence score > 0
