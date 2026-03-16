@@ -69,6 +69,8 @@ export const DockableApp = ({
   // Weather
   localWeather,
   dxWeather,
+  localAlerts,
+  dxAlerts,
   showDxWeather,
 
   // Space weather & solar
@@ -472,7 +474,7 @@ export const DockableApp = ({
         </div>
       </div>
 
-      <WeatherPanel weatherData={localWeather} allUnits={config.allUnits} nodeId={nodeId} />
+      <WeatherPanel weatherData={localWeather} allUnits={config.allUnits} nodeId={nodeId} alerts={localAlerts} />
     </div>
   );
 
@@ -590,7 +592,9 @@ export const DockableApp = ({
           </div>
         </div>
 
-        {showDxWeather && <WeatherPanel weatherData={dxWeather} allUnits={config.allUnits} nodeId={nodeId} />}
+        {showDxWeather && (
+          <WeatherPanel weatherData={dxWeather} allUnits={config.allUnits} nodeId={nodeId} alerts={dxAlerts} />
+        )}
       </div>
     );
   };
@@ -708,23 +712,23 @@ export const DockableApp = ({
           break;
 
         case 'solar':
-          content = <SolarPanel solarIndices={solarIndices} />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />;
           break;
 
         case 'solar-image':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="image" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="image" />;
           break;
 
         case 'solar-indices':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="indices" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="indices" />;
           break;
 
         case 'solar-xray':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="xray" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="xray" />;
           break;
 
         case 'lunar':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="lunar" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="lunar" />;
           break;
 
         case 'propagation':
@@ -990,6 +994,8 @@ export const DockableApp = ({
       showDxWeather,
       localWeather,
       dxWeather,
+      localAlerts,
+      dxAlerts,
       solarIndices,
       propagation,
       bandConditions,

@@ -225,6 +225,24 @@ export const Header = ({
               </span>
             </div>
           )}
+          {!isTablet && bandConditions?.extras?.solarWind && (
+            <div title="Solar Wind Speed">
+              <span style={{ color: 'var(--text-muted)' }}>SW </span>
+              <span
+                style={{
+                  color:
+                    parseFloat(bandConditions.extras.solarWind) >= 700
+                      ? 'var(--accent-red)'
+                      : parseFloat(bandConditions.extras.solarWind) >= 500
+                        ? 'var(--accent-amber)'
+                        : 'var(--accent-green)',
+                  fontWeight: '700',
+                }}
+              >
+                {bandConditions.extras.solarWind}
+              </span>
+            </div>
+          )}
           {!isTablet && bandConditions?.extras?.geomagField && (
             <div>
               <span
