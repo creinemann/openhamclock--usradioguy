@@ -24,8 +24,7 @@ module.exports = function (app, ctx) {
 
       // Log diagnostic info about the response
       if (Array.isArray(data) && data.length > 0) {
-        const sample = data[0];
-        logDebug('[POTA] API returned', data.length, 'spots. Sample fields:', Object.keys(sample).join(', '));
+        logDebug(`[POTA] API returned ${data.length} spots.`);
 
         // Count coordinate coverage
         const withLatLon = data.filter((s) => s.latitude && s.longitude).length;
@@ -64,8 +63,7 @@ module.exports = function (app, ctx) {
 
       // Log diagnostic info about the response
       if (Array.isArray(data) && data.length > 0) {
-        const sample = data[0];
-        logDebug('[WWFF] API returned', data.length, 'spots. Sample fields:', Object.keys(sample).join(', '));
+        logDebug(`[WWFF] API returned ${data.length} spots.`);
       }
 
       // Cache the response
@@ -104,6 +102,7 @@ module.exports = function (app, ctx) {
       const csvresults = Papa.parse(data, {
         skipFirstNLines: 1,
         header: true,
+        skipEmptyLines: true,
       });
 
       let summit = {};
@@ -162,11 +161,12 @@ module.exports = function (app, ctx) {
         data.forEach((s) => {
           s.summitDetails = sotaSummits.data[s.summitCode];
         });
+      } else {
+        logDebug('[SOTA] Summits Cache empty');
       }
       if (Array.isArray(data) && data.length > 0) {
-        const sample = data[0];
         sotaEpoch = data[0].epoch;
-        logDebug('[SOTA] API returned', data.length, 'spots. Sample fields:', Object.keys(sample).join(', '));
+        logDebug(`[SOTA] API returned ${data.length} spots.`);
       }
 
       // Cache the response
