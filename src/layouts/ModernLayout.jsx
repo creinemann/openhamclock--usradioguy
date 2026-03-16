@@ -495,7 +495,8 @@ export default function ModernLayout(props) {
           {pskPanel && mobileCard(pskPanel, 'psk', { minH: '250px' })}
 
           {/* Solar */}
-          {config.panels?.solar?.visible !== false && mobileCard(<SolarPanel solarIndices={solarIndices} />, 'solar')}
+          {config.panels?.solar?.visible !== false &&
+            mobileCard(<SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />, 'solar')}
 
           {/* Propagation */}
           {config.panels?.propagation?.visible !== false &&
@@ -557,7 +558,9 @@ export default function ModernLayout(props) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {deLocationPanel}
               {dxLocationPanel}
-              {config.panels?.solar?.visible !== false && <SolarPanel solarIndices={solarIndices} />}
+              {config.panels?.solar?.visible !== false && (
+                <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />
+              )}
               {config.panels?.propagation?.visible !== false && (
                 <PropagationPanel
                   propagation={propagation.data}
@@ -632,7 +635,9 @@ export default function ModernLayout(props) {
               <AnalogClockPanel currentTime={currentTime} sunTimes={deSunTimes} />
             </div>
           )}
-          {config.panels?.solar?.visible !== false && <SolarPanel solarIndices={solarIndices} />}
+          {config.panels?.solar?.visible !== false && (
+            <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />
+          )}
           {config.panels?.propagation?.visible !== false && (
             <PropagationPanel
               propagation={propagation.data}

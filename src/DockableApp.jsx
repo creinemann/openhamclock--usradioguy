@@ -708,23 +708,23 @@ export const DockableApp = ({
           break;
 
         case 'solar':
-          content = <SolarPanel solarIndices={solarIndices} />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />;
           break;
 
         case 'solar-image':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="image" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="image" />;
           break;
 
         case 'solar-indices':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="indices" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="indices" />;
           break;
 
         case 'solar-xray':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="xray" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="xray" />;
           break;
 
         case 'lunar':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="lunar" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="lunar" />;
           break;
 
         case 'propagation':
