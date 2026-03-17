@@ -1187,6 +1187,16 @@ module.exports = function (app, ctx) {
           let spotterLoc = null;
           let spotterGridSquare = null;
 
+          // Fixed spotter coordinates override (for local skimmer setups)
+          if (CONFIG.dxClusterSpotterLat != null && CONFIG.dxClusterSpotterLon != null) {
+            spotterLoc = {
+              lat: CONFIG.dxClusterSpotterLat,
+              lon: CONFIG.dxClusterSpotterLon,
+              country: '',
+              source: 'env-fixed',
+            };
+          }
+
           // Check if spot already has spotterGrid from proxy
           if (spot.spotterGrid) {
             const gridLoc = maidenheadToLatLon(spot.spotterGrid);
