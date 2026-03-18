@@ -259,22 +259,53 @@ module.exports = function (app, ctx) {
   }
 
   /**
-   * Fetch 24-hour predictions from ITURHFProp
+   * Fetch 24-hour predictions from ITURHFProp.
+   * This calls P.533-14 for all 24 hours and returns per-band, per-hour reliability.
+   * Results are cached for 10 minutes since they change slowly (SSN is daily).
    */
+  let iturhfpropHourlyCache = {
+    data: null,
+    key: null,
+    timestamp: 0,
+    maxAge: 10 * 60 * 1000, // 10 minutes — SSN/month don't change faster than this
+  };
+
   async function fetchITURHFPropHourly(txLat, txLon, rxLat, rxLon, ssn, month) {
     if (!ITURHFPROP_URL) return null;
+
+    const cacheKey = `hourly-${txLat.toFixed(1)},${txLon.toFixed(1)}-${rxLat.toFixed(1)},${rxLon.toFixed(1)}-${ssn}-${month}`;
+    const now = Date.now();
+
+    if (
+      iturhfpropHourlyCache.key === cacheKey &&
+      now - iturhfpropHourlyCache.timestamp < iturhfpropHourlyCache.maxAge
+    ) {
+      return iturhfpropHourlyCache.data;
+    }
 
     try {
       const url = `${ITURHFPROP_URL}/api/predict/hourly?txLat=${txLat}&txLon=${txLon}&rxLat=${rxLat}&rxLon=${rxLon}&ssn=${ssn}&month=${month}`;
 
-      const response = await fetch(url, { timeout: 60000 }); // 60s timeout for 24-hour calc
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s for 24-hour calc
+
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
       if (!response.ok) return null;
 
       const data = await response.json();
+
+      // Cache on success
+      if (data?.hourly?.length > 0) {
+        iturhfpropHourlyCache = { data, key: cacheKey, timestamp: now, maxAge: iturhfpropHourlyCache.maxAge };
+        logDebug(`[ITURHFProp] Cached 24-hour prediction (${data.hourly.length} hours)`);
+      }
+
       return data;
     } catch (err) {
       if (err.name !== 'AbortError') {
-        logErrorOnce('Hybrid', `ITURHFProp hourly: ${err.message}`);
+        logErrorOnce('ITURHFProp', `Hourly fetch: ${err.message}`);
       }
       return null;
     }
@@ -486,10 +517,93 @@ module.exports = function (app, ctx) {
         );
       }
 
-      // ===== HYBRID MODE: Try ITURHFProp first =====
-      let hybridResult = null;
+      // ===== ITURHFProp MODE: Use P.533-14 for all 24 hours =====
+      // ITU-R P.533-14 is the authoritative HF propagation model. It accounts for
+      // path geometry, ionospheric layers, D-layer absorption, multi-hop paths, and
+      // solar activity internally. Ionosonde data is kept for informational display
+      // only — P.533 does not need "correction" from potentially distant ionosondes.
+      const bands = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+      const bandFreqs = [1.8, 3.5, 7, 10, 14, 18, 21, 24, 28];
+
+      // Band frequency lookup: map ITURHFProp frequencies back to band names
+      // ITURHFProp uses slightly different center frequencies (e.g. 2.0 for 160m, 7.1 for 40m)
+      function freqToBand(freq) {
+        let bestBand = null;
+        let bestDist = Infinity;
+        for (let i = 0; i < bandFreqs.length; i++) {
+          const dist = Math.abs(freq - bandFreqs[i]);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestBand = bands[i];
+          }
+        }
+        return bestDist < 2 ? bestBand : null; // within 2 MHz tolerance
+      }
+
+      const effectiveIonoData = hasValidIonoData ? ionoData : null;
+      const predictions = {};
+      let currentBands;
+      let usedITURHFProp = false;
+      let iturhfpropMuf = null;
+
+      // Try ITURHFProp 24-hour prediction first
       if (useHybrid) {
-        const iturhfpropData = await fetchITURHFPropPrediction(
+        const hourlyData = await fetchITURHFPropHourly(de.lat, de.lon, dx.lat, dx.lon, ssn, currentMonth);
+
+        if (hourlyData?.hourly?.length === 24) {
+          logDebug('[Propagation] Using ITURHFProp P.533-14 for all 24 hours');
+          usedITURHFProp = true;
+
+          // Build predictions directly from P.533-14 output — no ionosonde correction
+          bands.forEach((band) => {
+            predictions[band] = [];
+          });
+
+          for (const hourEntry of hourlyData.hourly) {
+            const h = hourEntry.hour;
+
+            // Track MUF for current hour
+            if (h === currentHour && hourEntry.muf) {
+              iturhfpropMuf = hourEntry.muf;
+            }
+
+            // Map each frequency result to a band
+            const hourBandReliability = {};
+            for (const freqResult of hourEntry.frequencies || []) {
+              const band = freqToBand(freqResult.freq);
+              if (band) {
+                // P.533-14 BCR (Basic Circuit Reliability) is the definitive metric
+                hourBandReliability[band] = Math.max(0, Math.min(99, Math.round(freqResult.reliability)));
+              }
+            }
+
+            // Fill in each band for this hour
+            bands.forEach((band) => {
+              const reliability = hourBandReliability[band] ?? 0;
+              predictions[band].push({
+                hour: h,
+                reliability,
+                snr: calculateSNR(reliability),
+              });
+            });
+          }
+
+          // Current bands summary (sorted by reliability)
+          currentBands = bands
+            .map((band, idx) => ({
+              band,
+              freq: bandFreqs[idx],
+              reliability: predictions[band][currentHour]?.reliability || 0,
+              snr: predictions[band][currentHour]?.snr || '-20dB',
+              status: getStatus(predictions[band][currentHour]?.reliability || 0),
+            }))
+            .sort((a, b) => b.reliability - a.reliability);
+        }
+      }
+
+      // If ITURHFProp hourly failed, try single-hour for current state
+      if (!usedITURHFProp && useHybrid) {
+        const singleHour = await fetchITURHFPropPrediction(
           de.lat,
           de.lon,
           dx.lat,
@@ -498,54 +612,49 @@ module.exports = function (app, ctx) {
           currentMonth,
           currentHour,
         );
+        if (singleHour?.bands) {
+          logDebug('[Propagation] ITURHFProp hourly unavailable, using single-hour + built-in for 24h chart');
+          iturhfpropMuf = singleHour.muf;
 
-        if (iturhfpropData && hasValidIonoData) {
-          // Full hybrid: ITURHFProp + ionosonde correction
-          hybridResult = applyHybridCorrection(iturhfpropData, ionoData, kIndex, sfi);
-          logDebug('[Propagation] Using HYBRID mode (ITURHFProp + ionosonde correction)');
-        } else if (iturhfpropData) {
-          // ITURHFProp only (no ionosonde coverage)
-          hybridResult = {
-            bands: iturhfpropData.bands,
-            muf: iturhfpropData.muf,
-            model: 'ITU-R P.533-14 (ITURHFProp)',
-          };
-          logDebug('[Propagation] Using ITURHFProp only (no ionosonde coverage)');
+          // Use single-hour data for current bands
+          currentBands = bands
+            .map((band, idx) => {
+              const ituBand = singleHour.bands?.[band];
+              return {
+                band,
+                freq: bandFreqs[idx],
+                reliability: ituBand ? Math.round(ituBand.reliability) : 0,
+                snr: calculateSNR(ituBand?.reliability || 0),
+                status: ituBand
+                  ? ituBand.reliability >= 70
+                    ? 'GOOD'
+                    : ituBand.reliability >= 40
+                      ? 'FAIR'
+                      : 'POOR'
+                  : 'CLOSED',
+              };
+            })
+            .sort((a, b) => b.reliability - a.reliability);
         }
       }
 
       // ===== FALLBACK: Built-in calculations =====
-      const bands = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
-      const bandFreqs = [1.8, 3.5, 7, 10, 14, 18, 21, 24, 28];
+      // Used when ITURHFProp is unavailable (self-hosted without the service)
+      if (!predictions['160m'] || predictions['160m'].length === 0) {
+        logDebug(
+          `[Propagation] Using FALLBACK mode (built-in calculations)${useHybrid ? ' — ITURHFProp unavailable' : ''}`,
+        );
 
-      // Generate predictions (hybrid or fallback)
-      const effectiveIonoData = hasValidIonoData ? ionoData : null;
-      const predictions = {};
-      let currentBands;
-
-      if (hybridResult) {
-        // Use hybrid results for current bands
-        currentBands = bands
-          .map((band, idx) => {
-            const hybridBand = hybridResult.bands?.[band];
-            if (hybridBand) {
-              return {
-                band,
-                freq: bandFreqs[idx],
-                reliability: hybridBand.reliability,
-                baseReliability: hybridBand.baseReliability,
-                snr: calculateSNR(hybridBand.reliability),
-                status: hybridBand.status,
-                corrected: hybridBand.correctionApplied,
-              };
-            }
-            // Fallback for bands not in hybrid result
+        bands.forEach((band, idx) => {
+          const freq = bandFreqs[idx];
+          predictions[band] = [];
+          for (let hour = 0; hour < 24; hour++) {
             const reliability = calculateEnhancedReliability(
-              bandFreqs[idx],
+              freq,
               distance,
               midLat,
               midLon,
-              currentHour,
+              hour,
               sfi,
               ssn,
               kIndex,
@@ -555,125 +664,30 @@ module.exports = function (app, ctx) {
               currentHour,
               signalMarginDb,
             );
-            return {
+            predictions[band].push({
+              hour,
+              reliability: Math.round(reliability),
+              snr: calculateSNR(reliability),
+            });
+          }
+        });
+
+        if (!currentBands) {
+          currentBands = bands
+            .map((band, idx) => ({
               band,
               freq: bandFreqs[idx],
-              reliability: Math.round(reliability),
-              snr: calculateSNR(reliability),
-              status: getStatus(reliability),
-            };
-          })
-          .sort((a, b) => b.reliability - a.reliability);
-
-        // Generate 24-hour predictions with correction ratios from hybrid data
-        // This makes predictions more accurate by scaling them to match the hybrid model
-        bands.forEach((band, idx) => {
-          const freq = bandFreqs[idx];
-          predictions[band] = [];
-
-          // Calculate built-in reliability for current hour
-          const builtInCurrentReliability = calculateEnhancedReliability(
-            freq,
-            distance,
-            midLat,
-            midLon,
-            currentHour,
-            sfi,
-            ssn,
-            kIndex,
-            de,
-            dx,
-            effectiveIonoData,
-            currentHour,
-            signalMarginDb,
-          );
-
-          // Get hybrid reliability for this band (the accurate one)
-          const hybridBand = hybridResult.bands?.[band];
-          const hybridReliability = hybridBand?.reliability || builtInCurrentReliability;
-
-          // Calculate correction ratio (how much to scale predictions)
-          // Avoid division by zero, and cap the ratio to prevent extreme corrections
-          let correctionRatio = 1.0;
-          if (builtInCurrentReliability > 5) {
-            correctionRatio = hybridReliability / builtInCurrentReliability;
-            // Cap correction ratio to reasonable bounds (0.2x to 3x)
-            correctionRatio = Math.max(0.2, Math.min(3.0, correctionRatio));
-          } else if (hybridReliability > 20) {
-            // Built-in thinks band is closed but hybrid says it's open
-            correctionRatio = 2.0;
-          }
-
-          for (let hour = 0; hour < 24; hour++) {
-            const baseReliability = calculateEnhancedReliability(
-              freq,
-              distance,
-              midLat,
-              midLon,
-              hour,
-              sfi,
-              ssn,
-              kIndex,
-              de,
-              dx,
-              effectiveIonoData,
-              currentHour,
-              signalMarginDb,
-            );
-            // Apply correction ratio and clamp to valid range
-            const correctedReliability = Math.min(99, Math.max(0, Math.round(baseReliability * correctionRatio)));
-            predictions[band].push({
-              hour,
-              reliability: correctedReliability,
-              snr: calculateSNR(correctedReliability),
-            });
-          }
-        });
-      } else {
-        // Full fallback - use built-in calculations
-        logDebug('[Propagation] Using FALLBACK mode (built-in calculations)');
-
-        bands.forEach((band, idx) => {
-          const freq = bandFreqs[idx];
-          predictions[band] = [];
-          for (let hour = 0; hour < 24; hour++) {
-            const reliability = calculateEnhancedReliability(
-              freq,
-              distance,
-              midLat,
-              midLon,
-              hour,
-              sfi,
-              ssn,
-              kIndex,
-              de,
-              dx,
-              effectiveIonoData,
-              currentHour,
-              signalMarginDb,
-            );
-            predictions[band].push({
-              hour,
-              reliability: Math.round(reliability),
-              snr: calculateSNR(reliability),
-            });
-          }
-        });
-
-        currentBands = bands
-          .map((band, idx) => ({
-            band,
-            freq: bandFreqs[idx],
-            reliability: predictions[band][currentHour].reliability,
-            snr: predictions[band][currentHour].snr,
-            status: getStatus(predictions[band][currentHour].reliability),
-          }))
-          .sort((a, b) => b.reliability - a.reliability);
+              reliability: predictions[band][currentHour].reliability,
+              snr: predictions[band][currentHour].snr,
+              status: getStatus(predictions[band][currentHour].reliability),
+            }))
+            .sort((a, b) => b.reliability - a.reliability);
+        }
       }
 
       // Calculate MUF and LUF
       const currentMuf =
-        hybridResult?.muf || calculateMUF(distance, midLat, midLon, currentHour, sfi, ssn, effectiveIonoData);
+        iturhfpropMuf || calculateMUF(distance, midLat, midLon, currentHour, sfi, ssn, effectiveIonoData);
       const currentLuf = calculateLUF(distance, midLat, midLon, currentHour, sfi, kIndex);
 
       // Build ionospheric response
@@ -702,18 +716,20 @@ module.exports = function (app, ctx) {
 
       // Determine data source description
       let dataSource;
-      if (hybridResult && hasValidIonoData) {
-        dataSource = 'Hybrid: ITURHFProp (ITU-R P.533-14) + KC2G/GIRO ionosonde';
-      } else if (hybridResult) {
+      let modelName;
+      if (usedITURHFProp) {
         dataSource = 'ITURHFProp (ITU-R P.533-14)';
+        modelName = 'ITU-R P.533-14';
       } else if (hasValidIonoData) {
-        dataSource = 'KC2G/GIRO Ionosonde Network';
+        dataSource = 'Built-in model + KC2G/GIRO ionosonde';
+        modelName = 'Built-in estimation + ionosonde';
       } else {
         dataSource = 'Estimated from solar indices';
+        modelName = 'Built-in estimation';
       }
 
       res.json({
-        model: hybridResult?.model || 'Built-in estimation',
+        model: modelName,
         solarData: { sfi, ssn, kIndex },
         ionospheric: ionosphericResponse,
         muf: Math.round(currentMuf * 10) / 10,
@@ -727,10 +743,8 @@ module.exports = function (app, ctx) {
         signalMargin: Math.round(signalMarginDb * 10) / 10,
         hybrid: {
           enabled: useHybrid,
-          iturhfpropAvailable: hybridResult !== null,
+          iturhfpropAvailable: usedITURHFProp,
           ionosondeAvailable: hasValidIonoData,
-          correctionFactor: hybridResult?.correction?.factor?.toFixed(2),
-          confidence: hybridResult?.correction?.confidence,
         },
         dataSource,
       });
